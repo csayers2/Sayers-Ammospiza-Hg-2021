@@ -10,7 +10,7 @@ library(ggplot2)
 library(ggmap)
 library(sp)
 library(raster)
-# register_google(key = "AIzaSyAhVAGnjiPZgt0KtXSO_Od2j67CF6wEmD8", write = TRUE) # Chris' personal key
+# register_google(key = "Enter your key here", write = TRUE)
 
 # For google map, you have to give the center of the window you desire
 # Possibility for the map type argument: terrain / satellite / roadmap / hybrid
