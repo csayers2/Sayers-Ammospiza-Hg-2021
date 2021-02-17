@@ -1,4 +1,3 @@
-
 #--------------------------------------- LOADING & PARTITIONING THE DATA ------------------------------------------
 library(readxl)
 library(tidyverse)
@@ -293,7 +292,7 @@ precip <- worldclim$bio12_13
 points_spdf <- spTransform(points_spdf, crs(precip))
 
 # Extracting precipitation values
-precip30km <- raster::extract(x = precip, y = points_spdf, buffer = buffer_distance30km, df = T)
+precip30km <- raster::extract(x = precip, y = points_spdf, buffer = 30000, df = T)
 precip30km <- as.data.frame(precip30km)
 
 # Takes sum of average annual precipitation within 30km of each marsh centroid
