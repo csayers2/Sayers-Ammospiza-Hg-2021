@@ -39,8 +39,10 @@ plot(points_spdf)
 # Importing contiguous USA NLCD raster for 2016 (this is not available yet using FedData::get_nlcd)
 # NLCD 2016 Land Cover (CONUS) - https://www.mrlc.gov/data
 # It's very imoportant that the .img stays within the original NLCD folder - I think it communicates with metadata, etc.
+# We cannot put the raster within the GitHub repository because the files are too large
+# You can download the raster separately, save it to your desktop, and call it independently
 file.choose() # this function helps you find the exact file pathway
-nlcd_raster <- raster()
+nlcd_raster <- raster("/Users/chrissayers/Documents/Senior Thesis Stuff/NLCD_2016_Land_Cover_L48_20190424/NLCD_2016_Land_Cover_L48_20190424.img")
 crs(nlcd_raster) # Albers equal area projection, WGS84 datum, we will need to reproject spdf to match this
 plot(nlcd_raster)
 
@@ -2891,20 +2893,10 @@ ggplot() + # use ∆AIC to interpret easier
   theme_classic() +
   labs(x = "Radius (km)", y = "∆AICc") +
 # ggtitle("ln(THg) ~ % Developed + % Forest + Annual Precipitation + (1 | Site)") +
-  theme(plot.title = element_text(hjust = 0.5, size = 32, face = "bold", color = "black"),
-        axis.title.x = element_text(size = 32, face = "bold", color = "black"),
-        axis.title.y = element_text(size = 32, face = "bold"),
-        axis.text.x = element_text(size = 32, color = "black"),
-        axis.text.y = element_text(size = 32, color = "black"))
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold", color = "black"),
+        axis.title.x = element_text(size = 14, face = "bold", color = "black"),
+        axis.title.y = element_text(size = 14, face = "bold"),
+        axis.text.x = element_text(size = 12, color = "black"),
+        axis.text.y = element_text(size = 12, color = "black"))
 
-ggplot() +
-  geom_col(data = bothmodelsetsummary, mapping = aes(x = Radius, y = Delta_AICc), fill = "#808080") +
-  geom_smooth(data = bothmodelsetsummary, mapping = aes(x = Radius, y = Delta_AICc), color = "black", se = F) +
-  theme_classic() +
-  labs(x = "Radius (km)", y = "∆AICc") +
-  ggtitle("ln(Hg) ~ % Developed + % Forest + Annual Precipitation + (1 | Site)") +
-  theme(plot.title = element_text(hjust = 0.5, size = 36, face = "bold", color = "black"),
-        axis.title.x = element_text(size = 32, face = "bold", color = "black"),
-        axis.title.y = element_text(size = 32, face = "bold"),
-        axis.text.x = element_text(size = 32, color = "black"),
-        axis.text.y = element_text(size = 32, color = "black"))
+ggsave("Sayers_AICPlot.jpg", dpi = 750, width = 174, height = 116, units = "mm")
