@@ -1,3 +1,4 @@
+
 #--------------------------------------- LOADING & PARTITIONING THE DATA ------------------------------------------
 library(readxl)
 library(tidyverse)
@@ -34,13 +35,13 @@ SiteData <- HgSamples %>%
          SD.TMS = sd(HgConcentration))
 
 # Location summary statistics (just change the Site ID or State name to look up a region)
-LocationSALSData <- filter(SALSData, State %in% c("ME"))
+LocationSALSData <- filter(SALSData, State %in% c("NJ"))
 sd(LocationSALSData$HgConcentration)
 summary(LocationSALSData$HgConcentration)
 
-LocationSESPData <- filter(SESPData, SiteID %in% c("244399_HMD377a"))
-sd(LocationSESPData$HgConcentration)
-summary(LocationSESPData$HgConcentration)
+LocationSALSData <- filter(SALSData, SiteID %in% c("31427_HHO153a"))
+sd(LocationSALSData$HgConcentration)
+summary(LocationSALSData$HgConcentration)
 
 # How many birds are above the toxicity reference values published in Jackson et al. (2011)?
 # Change filters to answer different questions
@@ -77,7 +78,8 @@ shapiro.test(HgSamples$HgConcentration) # W = 0.88055, p-value = 2.242e-08, not 
 # Creating new column with natural-log transformed THg concentrations + date
 HgSamples <- HgSamples %>%
   mutate(lHgConcentration = log(HgConcentration)) %>%
-  mutate(Date = make_date(Year, Month, Day))
+  mutate(Date = make_date(Year, Month, Day),
+         JulianDate = yday(Date))
 ggdensity(HgSamples$lHgConcentration, xlab = "ln(THg) Concentration (µg/g ww)")
 ggqqplot(HgSamples$lHgConcentration) # much better than before
 shapiro.test(HgSamples$lHgConcentration) # W = 0.9787, p-value = 0.05391, just barely normal!
@@ -113,7 +115,7 @@ ggplot(data = HgSamples,
 library(raster)
 library(sp)
 
-# Making a spatial data frame from coordinates
+# Making a spatial data frame from Hg sample coordinates
 coords <- cbind(HgSamples$Longitude, HgSamples$Latitude)
 points_spdf <- SpatialPoints(coords, proj4string = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"))
 plot(points_spdf)
@@ -151,7 +153,7 @@ points_spdf4 <- points_spdf[61:80,]
 points_spdf5 <- points_spdf[81:100,]
 points_spdf6 <- points_spdf[101:120,]
 
-# I chose a 30 km buffer radius based on the results of RadiusSelection.R 
+# I chose a 30 km buffer radius based on the results of RadiusSelectionWetDep.R
 # We deemed 30 km to be the most appropriate scale of effect, since the 30 km model produced the lowest AIC score
 
 # Extracting NLCD values and turning into dataframes
@@ -278,28 +280,29 @@ prop.landcover30km <- prop.landcover30km %>%
   mutate(Water = rowSums(prop.landcover30km[,c("Unclassified", "Open Water")]))
 head(prop.landcover30km)
 
-#--------- WorldClim 2.0 Annual Precipitation --------------------------
-library(sp)
+
+#--------- Mercury Deposition Network Wet Deposition --------------------------
+# Read in the MDN wet deposition raster info (units in µg/m2)
 library(raster)
-library(rgdal)
-library(nlme)
+library(sp)
 
-# Read in the WorldClim 2.0 raster info
-worldclim <- raster::getData('worldclim', var = 'bio', res = 0.5, lat = 45, lon = -75)
-precip <- worldclim$bio12_13
+wetdep <- raster("Hg_dep_2017/Hg_dep_2017.tif")
+crs(wetdep) # Albers equal area projection, NAD83 datum, we will need to reproject spdf to match this
+plot(wetdep)
 
-# Reproject spdf to NLCD crs
-points_spdf <- spTransform(points_spdf, crs(precip))
+# Reproject spdf to MDN crs
+points_spdf <- spTransform(points_spdf, crs(wetdep))
+# Now there is agreement between raster crs and coordinates crs
 
-# Extracting precipitation values
-precip30km <- raster::extract(x = precip, y = points_spdf, buffer = 30000, df = T)
-precip30km <- as.data.frame(precip30km)
+# Extracting deposition values
+wetdep.ex <- raster::extract(x = wetdep, y = points_spdf, buffer = 30000, df = T)
+wetdep.ex <- as.data.frame(wetdep.ex)
 
-# Takes sum of average annual precipitation within 30km of each marsh centroid
-sum.precip30km <- precip30km %>%
-  setNames(c("ID", "value")) %>%
+# Takes average wet deposition in 2017 within 30km of each marsh centroid
+avg.wetdep30km <- wetdep.ex %>%
+  setNames(c("ID", "Hg_dep_2017")) %>%
   group_by(ID) %>%
-  summarise(SumPrecip = sum(value, na.rm = TRUE))
+  summarise(AvgWetDep = mean(Hg_dep_2017, na.rm = T)) 
 
 #----------------------------------------- DATA EXPLORATION CONTINUED ------------------------------------------
 
@@ -321,12 +324,10 @@ lcdf <- melt(data = prop.landcover30km, id.vars = "ID",
 ggplot(data = lcdf, mapping = aes(x = value, y = variable, fill = variable)) +
   geom_boxplot() +
   stat_summary(fun = mean, geom = "point", fill = "black", shape = 8, size = 3) +
-  theme_classic() +
+  theme_classic(base_size = 12) +
   theme(legend.position = "none") +
-  theme(axis.title.x = element_text(size = 32, face = "bold"),
-        axis.title.y = element_text(size = 32, face = "bold"), 
-        axis.text.x = element_text(size = 26),
-        axis.text.y = element_text(size = 26)) +
+  theme(axis.title.x = element_text(face = "bold"),
+        axis.title.y = element_text(face = "bold")) +
   labs(x = "Coverage within 30 km Radius", y = "NLCD Land Cover Class") +
   scale_x_continuous(labels = scales::percent) +
   geom_vline(xintercept = c(0.05), linetype = "dashed", color = "black")
@@ -353,21 +354,20 @@ ggplot(data = lumpedlcdf, mapping = aes(x = variable, y = value, fill = variable
   geom_violin(size = 1) +
   geom_boxplot(width = 0.1, fill="white", size = 1) +
   stat_summary(fun = mean, geom = "point", fill = "black", shape = 8, size = 3) +
-  theme_classic() +
+  theme_classic(base_size = 12) +
   theme(legend.position = "none") +
   theme(axis.title.x = element_blank(),
-        axis.title.y = element_text(size = 20, face = "bold"), 
-        axis.text.x = element_text(size = 15),
-        axis.text.y = element_text(size = 15)) +
+        axis.title.y = element_text(face = "bold")) +
   labs(x = "Landcover Type", y = "% Coverage within 30km") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   geom_hline(yintercept = c(0.05), linetype = "dashed", color = "black")
 
 # Cleavland dotplot of final predictor variables
-# 6 "developed" outliers could be especially problematic in the models
-contx <- data.frame(cbind(HgSamples, Hglandcover30km, sum.precip30km)) %>%
+# 6 "developed" outliers could be problematic in the models
+contx <- data.frame(cbind(HgSamples, Hglandcover30km, avg.wetdep30km)) %>%
   melt(id.vars = c("ID", "SiteID", "Latitude", "Species", "HgConcentration"),
-       measure.vars = c("Water", "Developed", "Forest", "Cultivated", "Wetlands", "SumPrecip"))
+       measure.vars = c("Water", "Developed", "Forest", "Cultivated", "Wetlands",
+                        "AvgWetDep", "JulianDate"))
 ggplot(contx, aes(x = value, y = reorder(SiteID, Latitude))) +
   geom_point() +
   facet_wrap(~ variable, scales = "free", nrow = 2) + 
@@ -388,7 +388,7 @@ anova <- aov(log(HgConcentration) ~ Species, data = HgSamples)
 summary(anova)
 
 #Making a single data frame for the model
-HgData30km <- data.frame(cbind(HgSamples, Hglandcover30km, sum.precip30km))
+HgData30km <- data.frame(cbind(HgSamples, Hglandcover30km, avg.wetdep30km))
 
 #CHECKING MULTICOLLINEARITY OF PREDICTORS ---------------
 library(ggpubr)
@@ -399,12 +399,12 @@ library(usdm)
 # wittle the predictor variables down from this list, testing for multicollinearity among
 # lumped and unlumped variables
 
-#X = data.frame(SALSHgData30km$Developed..Open.Space, SALSHgData30km$Developed..Low.Intensity,
-#               SALSHgData30km$Developed..Medium.Intensity, SALSHgData30km$Developed..High.Intensity,
-#               SALSHgData30km$Deciduous.Forest, SALSHgData30km$Evergreen.Forest, SALSHgData30km$Mixed.Forest,
-#               SALSHgData30km$Shrub.Scrub, SALSHgData30km$Woody.Wetlands,
-#               SALSHgData30km$Emergent.Herbaceous.Wetlands, SALSHgData30km$SumPrecip,
-#               SALSHgData30km$Latitude, SALSHgData30km$Longitude, SALSHgData30km$Weight)
+#X = data.frame(HgData30km$Developed..Open.Space, HgData30km$Developed..Low.Intensity,
+#               HgData30km$Developed..Medium.Intensity, HgData30km$Developed..High.Intensity,
+#               HgData30km$Deciduous.Forest, HgData30km$Evergreen.Forest, HgData30km$Mixed.Forest,
+#               HgData30km$Shrub.Scrub, HgData30km$Woody.Wetlands,
+#               HgData30km$Emergent.Herbaceous.Wetlands, HgData30km$AvgWetDep,
+#               HgData30km$Latitude, HgData30km$Longitude, HgData30km$Weight, HgData30km$JulianDate)
 
 # We initially included the proportion of wetland land cover, latitude, and longitude as fixed effects
 # However, independent variables were highly correlated at larger spatial scales, as indicated by variation
@@ -413,16 +413,17 @@ library(usdm)
 
 A = data.frame(HgData30km$Developed,
                HgData30km$Forest,
-               HgData30km$SumPrecip)
+               HgData30km$AvgWetDep,
+               HgData30km$JulianDate)
 vif(A)
 vifcor(A, th = 0.7)
 vifstep(A, th = 3)
 
-fullmodel <- lmer(log(HgConcentration) ~ scale(Developed) + scale(Forest) + scale(SumPrecip) 
-                  + Species + (1 | SiteID), data = HgData30km, REML = F)
+fullmodel <- lmer(log(HgConcentration) ~ scale(Developed) + scale(Forest) + scale(AvgWetDep) 
+                  + Species + scale(JulianDate) + (1 | SiteID), data = HgData30km, REML = F)
 
 # CHECKING MODEL ASSUMPTIONS -------------------------------------
-# Checking for homogeneity of variance & normality of resiudals
+# Checking for homogeneity of variance & normality of residuals
 mean(residuals(fullmodel)) # very very close to 0
 
 library(ggResidpanel)
@@ -430,8 +431,8 @@ resid_panel(fullmodel, plots = "all", type = NA, bins = 30,
             smoother = T, qqline = T, qqbands = T, scale = 1,
             theme = "bw", axis.text.size = 10, title.text.size = 12,
             title.opt = TRUE, nrow = NULL)
-shapiro.test(residuals(fullmodel)) # normal!
-# resiudal plots looks great
+shapiro.test(residuals(fullmodel)) # not normal
+# residual plots looks great
 # normality plot has a few tail stragglers, but the rest looks good
 
 # Checking for normality of random effects
@@ -444,46 +445,80 @@ acf(HgData30km$HgConcentration) # raw data is autocorrelated
 acf(residuals(fullmodel)) # random effects variable corrects for this
 runs.test(residuals(fullmodel)) # we do not have autocorrelated data
 
-
-#CANDIDATE MODEL SET (15 MODELS) -----------------------------------------------
+#CANDIDATE MODEL SET (32 MODELS) -----------------------------------------------
 library(AICcmodavg)
 library(lmerTest)
-fullmodel <- lmer(log(HgConcentration) ~ scale(Developed) + scale(Forest) + scale(SumPrecip) 
-                  + Species + (1 | SiteID), data = HgData30km, REML = F)
+fullmodel <- lmer(log(HgConcentration) ~ scale(Developed) + scale(Forest) + scale(AvgWetDep) 
+                  + Species + scale(JulianDate) + (1 | SiteID), data = HgData30km, REML = F)
 
 mod1 <- lmer(log(HgConcentration) ~ scale(Developed) + (1 | SiteID), data = HgData30km, REML = F)
 mod2 <- lmer(log(HgConcentration) ~ scale(Forest) + (1 | SiteID), data = HgData30km, REML = F)
-mod3 <- lmer(log(HgConcentration) ~ scale(SumPrecip) + (1 | SiteID), data = HgData30km, REML = F)
+mod3 <- lmer(log(HgConcentration) ~ scale(AvgWetDep) + (1 | SiteID), data = HgData30km, REML = F)
 mod4 <- lmer(log(HgConcentration) ~ Species + (1 | SiteID), data = HgData30km, REML = F)
-mod5 <- lmer(log(HgConcentration) ~ (1 | SiteID), data = HgData30km, REML = F)
+mod5 <- lmer(log(HgConcentration) ~ scale(JulianDate) + (1 | SiteID), data = HgData30km, REML = F)
+mod6 <- lmer(log(HgConcentration) ~ (1 | SiteID), data = HgData30km, REML = F)
 
-mod6 <- lmer(log(HgConcentration) ~ scale(Developed) + scale(Forest) + (1 | SiteID),
+mod7 <- lmer(log(HgConcentration) ~ scale(Developed) + scale(Forest) + (1 | SiteID),
              data = HgData30km, REML = F)
-mod7 <- lmer(log(HgConcentration) ~ scale(Developed) + scale(SumPrecip) + (1 | SiteID),
+mod8 <- lmer(log(HgConcentration) ~ scale(Developed) + scale(AvgWetDep) + (1 | SiteID),
              data = HgData30km, REML = F)
-mod8 <- lmer(log(HgConcentration) ~ scale(Developed) + Species + (1 | SiteID),
+mod9 <- lmer(log(HgConcentration) ~ scale(Developed) + Species + (1 | SiteID),
              data = HgData30km, REML = F)
-mod9 <- lmer(log(HgConcentration) ~ scale(Forest) + scale(SumPrecip) + (1 | SiteID),
-             data = HgData30km, REML = F)
-mod10 <- lmer(log(HgConcentration) ~ scale(Forest) + Species + (1 | SiteID),
-             data = HgData30km, REML = F)
-mod11 <- lmer(log(HgConcentration) ~ scale(SumPrecip) + Species + (1 | SiteID),
+mod10 <- lmer(log(HgConcentration) ~ scale(Developed) + scale(JulianDate) + (1 | SiteID),
+              data = HgData30km, REML = F)
+mod11 <- lmer(log(HgConcentration) ~ scale(Forest) + scale(AvgWetDep) + (1 | SiteID),
+              data = HgData30km, REML = F)
+mod12 <- lmer(log(HgConcentration) ~ scale(Forest) + Species + (1 | SiteID),
+              data = HgData30km, REML = F)
+mod13 <- lmer(log(HgConcentration) ~ scale(Forest) + scale(JulianDate) + (1 | SiteID),
+              data = HgData30km, REML = F)
+mod14 <- lmer(log(HgConcentration) ~ scale(AvgWetDep) + Species + (1 | SiteID),
+              data = HgData30km, REML = F)
+mod15 <- lmer(log(HgConcentration) ~ scale(AvgWetDep) + scale(JulianDate) + (1 | SiteID),
+              data = HgData30km, REML = F)
+mod16 <- lmer(log(HgConcentration) ~ Species + scale(JulianDate) + (1 | SiteID),
               data = HgData30km, REML = F)
 
-mod12 <- lmer(log(HgConcentration) ~ scale(Developed) + scale(Forest) + scale(SumPrecip) 
-             + (1 | SiteID), data = HgData30km, REML = F)
-mod13 <- lmer(log(HgConcentration) ~ scale(Developed) + scale(Forest) + Species
-             + (1 | SiteID), data = HgData30km, REML = F)
-mod14 <- lmer(log(HgConcentration) ~ scale(Developed) + scale(SumPrecip) + Species
-             + (1 | SiteID), data = HgData30km, REML = F)
-mod15 <- lmer(log(HgConcentration) ~ scale(Forest) + scale(SumPrecip) + Species
-             + (1 | SiteID), data = HgData30km, REML = F)
+mod17 <- lmer(log(HgConcentration) ~ scale(Developed) + scale(Forest) + scale(AvgWetDep) 
+              + (1 | SiteID), data = HgData30km, REML = F)
+mod18 <- lmer(log(HgConcentration) ~ scale(Developed) + scale(Forest) + Species
+              + (1 | SiteID), data = HgData30km, REML = F)
+mod19 <- lmer(log(HgConcentration) ~ scale(Developed) + scale(Forest) + scale(JulianDate)
+              + (1 | SiteID), data = HgData30km, REML = F)
+mod20 <- lmer(log(HgConcentration) ~ scale(Developed) + scale(AvgWetDep) + Species
+              + (1 | SiteID), data = HgData30km, REML = F)
+mod21 <- lmer(log(HgConcentration) ~ scale(Developed) + scale(AvgWetDep) + scale(JulianDate)
+              + (1 | SiteID), data = HgData30km, REML = F)
+mod22 <- lmer(log(HgConcentration) ~ scale(Developed) + Species + scale(JulianDate)
+              + (1 | SiteID), data = HgData30km, REML = F)
+mod23 <- lmer(log(HgConcentration) ~ scale(Forest) + scale(AvgWetDep) + Species
+              + (1 | SiteID), data = HgData30km, REML = F)
+mod24 <- lmer(log(HgConcentration) ~ scale(Forest) + scale(AvgWetDep) + scale(JulianDate)
+              + (1 | SiteID), data = HgData30km, REML = F)
+mod25 <- lmer(log(HgConcentration) ~ scale(Forest) + Species + scale(JulianDate)
+              + (1 | SiteID), data = HgData30km, REML = F)
+mod26 <- lmer(log(HgConcentration) ~ scale(AvgWetDep) + Species + scale(JulianDate)
+              + (1 | SiteID), data = HgData30km, REML = F)
+
+mod27 <- lmer(log(HgConcentration) ~ scale(Developed) + scale(Forest) + scale(AvgWetDep) + Species
+              + (1 | SiteID), data = HgData30km, REML = F)
+mod28 <- lmer(log(HgConcentration) ~ scale(Developed) + scale(Forest) + scale(AvgWetDep) + scale(JulianDate)
+              + (1 | SiteID), data = HgData30km, REML = F)
+mod29 <- lmer(log(HgConcentration) ~ scale(Developed) + scale(Forest) + Species + scale(JulianDate)
+              + (1 | SiteID), data = HgData30km, REML = F)
+mod30 <- lmer(log(HgConcentration) ~ scale(Developed) + scale(AvgWetDep) + Species + scale(JulianDate)
+              + (1 | SiteID), data = HgData30km, REML = F)
+mod31 <- lmer(log(HgConcentration) ~ scale(Forest) + scale(AvgWetDep) + Species + scale(JulianDate)
+              + (1 | SiteID), data = HgData30km, REML = F)
 
 # Creating candidate model set
 candset = list(fullmodel, mod1, mod2, mod3, mod4, mod5, mod6, mod7, mod8, mod9, mod10, mod11, mod12, mod13,
-               mod14, mod15)
+               mod14, mod15, mod16, mod17, mod18, mod19, mod20, mod21, mod22, mod23,
+               mod24, mod25, mod26, mod27, mod28, mod29, mod30, mod31)
 modnames = c("fullmod", "mod1", "mod2", "mod3", "mod4", "mod5", "mod6", "mod7", "mod8", "mod9", "mod10",
-             "mod11", "mod12", "mod13", "mod14", "mod15")
+             "mod11", "mod12", "mod13", "mod14", "mod15", "mod16", "mod17", "mod18", "mod19", "mod20", 
+             "mod21", "mod22", "mod23", "mod24", "mod25", "mod26", "mod27", "mod28", "mod29", "mod30",
+             "mod31")
 modelsetsummary <- as.data.frame(aictab(cand.set = candset, modnames = modnames))
 View(modelsetsummary)
 
@@ -493,38 +528,3 @@ summary(modelavg)
 
 confint(modelavg) # unconditional 95% CI
 MuMIn::importance(modelavg)
-
-summary(fullmodel)
-summary(mod1)
-summary(mod6)
-summary(mod7)
-summary(mod8)
-summary(mod12)
-summary(mod13)
-summary(mod14)
-
-# Any "influential" observations?
-library(influence.ME)
-infl <- influence(fullmodel, obs = TRUE)
-plot(infl, which = "cook",
-     cutoff = .148, sort = F, #using cutoff 4/27 sites = 0.148
-     xlab = "Cook´s Distance",
-     ylab = "Observation ID")
-
-plot(infl, which = "dfbetas",
-     parameters=c(2),
-     xlab = "DFBetas",
-     ylab = "Observation ID",
-     main = "Developed")
-
-plot(infl, which = "dfbetas",
-     parameters=c(3),
-     xlab = "DFBetas",
-     ylab = "Observation ID",
-     main = "Forest")
-
-plot(infl, which = "dfbetas",
-     parameters=c(4),
-     xlab = "DFBetas",
-     ylab = "Observation ID",
-     main = "SumPrecip")
